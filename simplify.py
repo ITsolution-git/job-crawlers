@@ -12,7 +12,7 @@ class Main(Base):
     headers = {}
 
     def __init__(self, is_save_in_database=False):
-        super().__init__(os.path.basename(__file__))
+        super().__init__(os.path.basename(__file__), is_save_in_database=is_save_in_database)
 
     def _is_posted_from_yesterday_to_now(self, posted_dt: datetime) -> bool:
         now = datetime.now()

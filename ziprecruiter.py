@@ -11,8 +11,8 @@ class Main(Base):
     base_url = "https://www.ziprecruiter.com"
     headers = {}
 
-    def __init__(self):
-        super().__init__(os.path.basename(__file__))
+    def __init__(self, is_save_in_database=False):
+        super().__init__(os.path.basename(__file__), is_save_in_database=is_save_in_database)
         self.driver = self.get_driver()
 
     def run(self):
