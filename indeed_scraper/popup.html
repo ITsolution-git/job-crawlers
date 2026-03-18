@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Indeed External Jobs</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- ── Header ──────────────────────────────────────────────────── -->
+  <header>
+    <div class="logo">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+      </svg>
+      <span>Indeed External Jobs</span>
+    </div>
+    <div class="header-meta" id="header-meta">0 jobs collected</div>
+  </header>
+
+  <!-- ── Stats bar ────────────────────────────────────────────────── -->
+  <div class="stats-bar">
+    <div class="stat">
+      <span class="stat-value" id="stat-external">0</span>
+      <span class="stat-label">External</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="stat-salary">0</span>
+      <span class="stat-label">With Salary</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="stat-remote">0</span>
+      <span class="stat-label">Remote</span>
+    </div>
+    <div class="stat">
+      <span class="stat-value" id="stat-total">0</span>
+      <span class="stat-label">Total</span>
+    </div>
+  </div>
+
+  <!-- ── Toolbar ──────────────────────────────────────────────────── -->
+  <div class="toolbar">
+    <input
+      type="text"
+      id="search"
+      class="search-input"
+      placeholder="Search title, company, country…"
+      autocomplete="off"
+    />
+    <div class="toolbar-actions">
+      <button id="btn-crawl" class="btn btn-crawl" title="Auto-click every job card on this page and capture its data">
+        <svg id="crawl-icon-play" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+          <polygon points="5,3 19,12 5,21"/>
+        </svg>
+        <svg id="crawl-icon-stop" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="display:none">
+          <rect x="4" y="4" width="16" height="16" rx="2"/>
+        </svg>
+        <span id="crawl-label">Start Crawling</span>
+      </button>
+      <button id="btn-export-csv" class="btn btn-accent" title="Download CSV with all 8 fields">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Export CSV
+      </button>
+      <button id="btn-copy-all" class="btn btn-sm" title="Copy all job URLs to clipboard">Copy URLs</button>
+      <button id="btn-clear" class="btn btn-sm btn-danger" title="Clear stored jobs">Clear</button>
+    </div>
+  </div>
+
+  <!-- ── Crawl progress bar (hidden until crawling) ───────────────── -->
+  <div class="crawl-bar" id="crawl-bar" style="display:none">
+    <div class="crawl-bar-track">
+      <div class="crawl-bar-fill" id="crawl-bar-fill" style="width:0%"></div>
+    </div>
+    <span class="crawl-bar-label" id="crawl-bar-label">0 / 0</span>
+  </div>
+
+  <!-- ── Instruction banner (shown only when 0 jobs) ─────────────── -->
+  <div class="banner" id="banner-hint">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="8" x2="12" y2="12"/>
+      <line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+    On Indeed, <strong>click any job card</strong> that is <em>not</em> "Easily apply" — it will be captured automatically.
+  </div>
+
+  <!-- ── Job list ─────────────────────────────────────────────────── -->
+  <div id="job-list" class="job-list">
+    <div class="empty-state" id="empty-state">
+      <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" stroke-width="1.4">
+        <rect x="2" y="7" width="20" height="14" rx="2"/>
+        <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/>
+      </svg>
+      <p>No external jobs captured yet.</p>
+      <p>Open an Indeed job that shows <strong>"Apply on company site"</strong><br/>and it will appear here automatically.</p>
+    </div>
+  </div>
+
+  <!-- ── Toast ────────────────────────────────────────────────────── -->
+  <div id="toast" class="toast" aria-live="polite"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
