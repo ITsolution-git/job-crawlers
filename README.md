@@ -44,6 +44,30 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+## Setup (macOS)
+
+1. Install Xcode Command Line Tools (once):
+```bash
+xcode-select --install
+```
+2. Create and activate a virtual environment:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+4. Install Google Chrome or Chromium, then start Chrome with remote debugging:
+```bash
+./start_chrome.sh
+```
+5. Run the crawler:
+```bash
+python ziprecruiter.py
+```
+
 ## Running a crawler
 
 Run a crawler script directly from the repo root:
