@@ -8,7 +8,9 @@
 (function () {
   'use strict';
 
-  const STORAGE_KEY = 'indeed_external_jobs';
+  const STORAGE_KEY   = 'indeed_external_jobs';
+  const API_BASE      = 'http://18.191.195.218';
+  const PLATFORM_SLUG = 'indeed';
 
   // ── DOM refs ─────────────────────────────────────────────────────────────────
   const jobList        = document.getElementById('job-list');
@@ -16,6 +18,7 @@
   const bannerHint     = document.getElementById('banner-hint');
   const searchInput    = document.getElementById('search');
   const btnExportCsv   = document.getElementById('btn-export-csv');
+  const btnSaveDb      = document.getElementById('btn-save-db');
   const btnCopyAll     = document.getElementById('btn-copy-all');
   const btnClear       = document.getElementById('btn-clear');
   const btnCrawl       = document.getElementById('btn-crawl');
@@ -210,6 +213,94 @@
       .replace(/"/g, '&quot;');
   }
 
+  // ── Database save ─────────────────────────────────────────────────────────────
+
+  function parseSalary(raw) {
+    if (!raw) return { min: '', max: '', period: '', currency: '' };
+    const currency = raw.includes('$') ? 'USD' : '';
+    let period = '';
+    if (/year|yr|annual/i.test(raw))  period = 'year';
+    else if (/hour|hr/i.test(raw))    period = 'hour';
+    else if (/month/i.test(raw))      period = 'month';
+    else if (/week/i.test(raw))       period = 'week';
+    const nums   = raw.match(/[\d,]+(?:\.\d+)?/g) || [];
+    const values = nums.map((n) => parseFloat(n.replace(/,/g, '')));
+    return { min: values[0] ?? '', max: values[1] ?? '', period, currency };
+  }
+
+  async function getOrCreatePlatform() {
+    const res  = await fetch(`${API_BASE}/api/v1/platforms/?slug=${PLATFORM_SLUG}`);
+    const data = await res.json();
+    if (data.results && data.results.length > 0) return data.results[0];
+    const createRes = await fetch(`${API_BASE}/api/v1/platforms/`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ name: 'Indeed', slug: PLATFORM_SLUG, website: 'https://www.indeed.com' }),
+    });
+    return createRes.json();
+  }
+
+  async function saveToDatabase() {
+    const jobs = filteredJobs();
+    if (jobs.length === 0) { showToast('No external jobs to save'); return; }
+
+    btnSaveDb.disabled = true;
+    showToast('Connecting to database…', 60000);
+
+    let platform;
+    try {
+      platform = await getOrCreatePlatform();
+    } catch (err) {
+      showToast('Failed to reach database');
+      btnSaveDb.disabled = false;
+      return;
+    }
+
+    let saved = 0, failed = 0;
+    const version = (platform.version || 0) + 1;
+
+    for (const job of jobs) {
+      const salary = parseSalary(job.salaryRange || '');
+      const postedAt = job.capturedAt
+        ? new Date(job.capturedAt).toISOString().replace('T', ' ').slice(0, 19)
+        : '';
+      const payload = {
+        unique_id:        job.jk           || '',
+        title:            job.title        || '',
+        company:          job.company      || '',
+        country:          job.country      || '',
+        salary_min:       salary.min,
+        salary_max:       salary.max,
+        salary_period:    salary.period,
+        salary_currency:  salary.currency,
+        work_arrangement: job.workArrangement  || '',
+        posted_at:        postedAt,
+        experience_level: job.experienceLevel  || '',
+        job_type:         job.jobType          || '',
+        skills:           '',
+        url:              job.jk ? `https://www.indeed.com/viewjob?jk=${job.jk}` : '',
+        job_url:          job.jobUrl           || '',
+        platform:         platform.id,
+        version,
+      };
+      try {
+        const res = await fetch(`${API_BASE}/api/v1/listings/`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify(payload),
+        });
+        (res.status === 200 || res.status === 201) ? saved++ : failed++;
+      } catch {
+        failed++;
+      }
+      showToast(`Saving… ${saved + failed} / ${jobs.length}`, 60000);
+    }
+
+    btnSaveDb.disabled = false;
+    const failNote = failed > 0 ? `, ${failed} failed` : '';
+    showToast(`Done: ${saved} saved${failNote}`, 4000);
+  }
+
   // ── CSV export ────────────────────────────────────────────────────────────────
 
   /**
@@ -362,6 +453,7 @@
   });
 
   btnExportCsv.addEventListener('click', exportCsv);
+  btnSaveDb.addEventListener('click', saveToDatabase);
   btnCopyAll.addEventListener('click', copyAllUrls);
 
   btnClear.addEventListener('click', () => {
