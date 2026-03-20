@@ -310,12 +310,13 @@
 
     // Fallback URL: indeed viewjob link (still navigates to external site)
     if (!jobUrl && !isEasyApply) {
-      const urlParams = new URLSearchParams(window.location.search);
-      const jk =
-        urlParams.get('jk') ||
-        urlParams.get('vjk') ||
-        resolveCurrentJk();
-      if (jk) jobUrl = `https://www.indeed.com/viewjob?jk=${jk}`;
+      return;
+      // const urlParams = new URLSearchParams(window.location.search);
+      // const jk =
+      //   urlParams.get('jk') ||
+      //   urlParams.get('vjk') ||
+      //   resolveCurrentJk();
+      // if (jk) jobUrl = `https://www.indeed.com/viewjob?jk=${jk}`;
     }
 
     if (!title) return null;
@@ -434,19 +435,22 @@
    * Returns false when there is no next-page link (last page reached) or the
    * navigation times out.
    */
-  async function navigateToNextPage(pageNum, totalCards, processed, captured) {
+  async function navigateToNextPage(pageNum, totalCards, processed, captured, searchUrl) {
     const nextLink = document.querySelector('a[data-testid="pagination-page-next"]');
     if (!nextLink) return false;
 
     // Persist crawl state BEFORE clicking — Indeed does a full page navigation,
     // which destroys this script's context. The new page's bootstrap will read
     // this state and resume crawlJobs automatically.
+    // Store the destination URL so a viewjob redirect can navigate to the right page.
     await saveCrawlState({
       isCrawling: true,
       pageNum: pageNum + 1,
       totalCards,
       processed,
       captured,
+      searchUrl: nextLink.href,  // destination, not origin
+      cardIndex: 0,
     });
 
     nextLink.click();
@@ -480,6 +484,8 @@
     let totalCards = resumeState?.totalCards  || 0;
     let processed  = resumeState?.processed  || 0;
     let captured   = resumeState?.captured   || 0;
+    let cardIndex  = resumeState?.cardIndex  || 0;  // card index within current page
+    let searchUrl  = window.location.href;           // always the current page's URL
 
     chrome.runtime.sendMessage({
       type: 'CRAWL_PROGRESS', status: 'started', page: pageNum,
@@ -493,15 +499,17 @@
         )
       );
 
-      // Accumulate total across pages so the progress bar fills cumulatively
-      totalCards += cards.length;
+      // Accumulate total across pages. If resuming mid-page (cardIndex > 0),
+      // this page's cards were already counted — don't double-add.
+      if (cardIndex === 0) totalCards += cards.length;
 
       chrome.runtime.sendMessage({
         type: 'CRAWL_PROGRESS', status: 'running', page: pageNum,
         total: totalCards, processed, captured,
       }).catch(() => {});
 
-      for (const card of cards) {
+      for (let ci = cardIndex; ci < cards.length; ci++) {
+        const card = cards[ci];
         if (!isCrawling) break;
 
         // Skip "Easily Apply" jobs early — no need to click or wait for the panel
@@ -513,6 +521,18 @@
           }).catch(() => {});
           continue;
         }
+
+        // Persist position before clicking — the click changes the URL to /viewjob,
+        // so if the crawl is restarted from the popup, we resume from this card.
+        await saveCrawlState({
+          isCrawling: true,
+          pageNum,
+          totalCards,
+          processed,
+          captured,
+          searchUrl,
+          cardIndex: ci,
+        });
 
         card.scrollIntoView({ behavior: 'smooth', block: 'center' });
         await new Promise((r) => setTimeout(r, 300)); // let scroll settle
@@ -550,30 +570,45 @@
         }
 
         const jk = resolveCurrentJk();
-        if (jk) {
-          const data = extractJobData();
-          if (data && !data.isEasyApply) {
-            // Open #applyButtonLinkContainer in a hidden tab, follow redirect,
-            // capture the real external company URL
-            const externalUrl = await captureExternalUrl();
-
-            const storedJobs = await getStoredJobs();
-            const existing   = storedJobs[jk] || {};
-            storedJobs[jk]   = {
-              ...existing,
-              ...data,
-              jk,
-              jobUrl: externalUrl || data.jobUrl || existing.jobUrl || '',
-              capturedAt: Date.now(),
-            };
-            await saveJobs(storedJobs);
-            captured++;
-            notifyPopup();
-          } else {
-            continue;
-          }
-        } else {
+        if (!jk) {
+          // No job key found — navigate back to the search results and skip
+          history.back();
+          await new Promise((r) => setTimeout(r, 1000));
+          processed++;
+          chrome.runtime.sendMessage({
+            type: 'CRAWL_PROGRESS', status: 'running', page: pageNum,
+            total: totalCards, processed, captured,
+          }).catch(() => {});
           continue;
+        }
+
+        const data = extractJobData();
+        if (!data || data.isEasyApply) {
+          processed++;
+          chrome.runtime.sendMessage({
+            type: 'CRAWL_PROGRESS', status: 'running', page: pageNum,
+            total: totalCards, processed, captured,
+          }).catch(() => {});
+          continue;
+        }
+
+        {
+          // Open #applyButtonLinkContainer in a hidden tab, follow redirect,
+          // capture the real external company URL
+          const externalUrl = await captureExternalUrl();
+
+          const storedJobs = await getStoredJobs();
+          const existing   = storedJobs[jk] || {};
+          storedJobs[jk]   = {
+            ...existing,
+            ...data,
+            jk,
+            jobUrl: externalUrl || data.jobUrl || existing.jobUrl || '',
+            capturedAt: Date.now(),
+          };
+          await saveJobs(storedJobs);
+          captured++;
+          notifyPopup();
         }
 
         processed++;
@@ -585,12 +620,39 @@
 
       if (!isCrawling) break;
 
+      cardIndex = 0; // all cards on this page done; next page starts from the beginning
+      let tempSearchKey = window.location.search;
+
       // Try to advance to the next page; stop if none exists
-      const hasNextPage = await navigateToNextPage(pageNum, totalCards, processed, captured);
-      if (!hasNextPage) break;
-      // // If navigateToNextPage returned true, a full page navigation was triggered.
-      // // This script will be destroyed — the new page's bootstrap resumes crawlJobs.
-      // return;
+      const hasNextPage = await navigateToNextPage(pageNum, totalCards, processed, captured, searchUrl);
+      console.log("***hasNextPage: ", hasNextPage);
+      console.log("***tempSearchKey: ", tempSearchKey);
+      if (!hasNextPage) {
+        // No more pagination links — jump to the next offset using the current
+        // search query so crawling continues seamlessly across result windows.
+        // Indeed uses `start=N` where N = pageIndex * 16 (0, 16, 32, …).
+        const currentParams = new URLSearchParams(tempSearchKey);
+        const nextStart = pageNum * 10;
+        currentParams.set('start', String(nextStart));
+
+        const restartUrl = new URL('https://www.indeed.com/jobs');
+        restartUrl.search = currentParams.toString();
+
+        // Persist state before the full-page navigation destroys this context.
+        // Store the destination URL so a viewjob redirect can navigate to the right page.
+        await saveCrawlState({
+          isCrawling: true,
+          pageNum: pageNum + 1,
+          totalCards,
+          processed,
+          captured,
+          searchUrl: restartUrl.toString(),  // destination, not origin
+          cardIndex: 0,
+        });
+
+        window.location.href = restartUrl.toString();
+        return; // page is unloading — nothing left to do here
+      }
 
       pageNum++;
     }
@@ -646,6 +708,12 @@
   // Auto-resume crawling if we arrived here via a full page navigation mid-crawl
   getCrawlState().then((state) => {
     if (state?.isCrawling) {
+      // If the user ended up on a viewjob page instead of search results,
+      // navigate back to the search page so crawlJobs can find job cards.
+      if (window.location.pathname === '/viewjob' && state.searchUrl) {
+        window.location.href = state.searchUrl;
+        return;
+      }
       crawlJobs(state);
     }
   });

@@ -322,8 +322,39 @@
     } else {
       // Start
       setCrawlState(true);
-      updateCrawlProgress(0, 0, 0);
-      chrome.tabs.sendMessage(tab.id, { type: 'START_CRAWL' }).catch(() => {
+      updateCrawlProgress(0, 0, 0, 1);
+
+      // If the active tab is on a viewjob page, navigate back to the search
+      // results page and let the content script auto-resume via stored crawl state.
+      if ((tab.url.includes('/viewjob') && tab.url.includes('jk=')) || tab.url.includes('?from=jobsearch-empty-whatwhere')) {
+        await new Promise((r) => setTimeout(r, 10000));
+        chrome.storage.local.get(['indeed_crawl_state'], (result) => {
+          const state = result['indeed_crawl_state'] || {};
+          const targetUrl = state.searchUrl || 'https://www.indeed.com/jobs';
+          chrome.storage.local.set(
+            { 'indeed_crawl_state': { ...state, isCrawling: true } },
+            () => chrome.tabs.update(tab.id, { url: targetUrl })
+          );
+        });
+
+        return;
+      } else if (tab.url.includes('/jobs?') && !tab.url.includes('q=') && !tab.url.includes(`from=`)) {
+        // wait 15 seconds
+        await new Promise((r) => setTimeout(r, 15000)); // wait for captcha bypass
+
+        chrome.storage.local.get(['indeed_crawl_state'], (result) => {
+          const state = result['indeed_crawl_state'] || {};
+          const targetUrl = state.searchUrl || 'https://www.indeed.com/jobs';
+          chrome.storage.local.set(
+            { 'indeed_crawl_state': { ...state, isCrawling: true } },
+            () => chrome.tabs.update(tab.id, { url: targetUrl })
+          );
+        });
+
+        return;
+      }
+
+      chrome.tabs.sendMessage(tab.id, { type: 'START_CRAWL' }).catch((err) => {
         setCrawlState(false);
         showToast('Could not reach the page. Try refreshing Indeed.');
       });
