@@ -132,4 +132,4 @@ class Main(Base):
 
 
 if __name__ == '__main__':
-    Main(is_save_in_database=False).run()
+    Main(is_save_in_database=True).run()
