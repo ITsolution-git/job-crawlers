@@ -143,9 +143,41 @@ class Base:
                 if os.path.exists(candidate):
                     options.binary_location = candidate
                     break
-            # Let Selenium manage the correct ChromeDriver binary for the
-            # *current* browser version (your attached browser is Chrome/145).
-            driver = webdriver.Chrome(options=options)
+            # Let webdriver_manager download a ChromeDriver matching the
+            # attached browser's major version and use it via Service.
+            # This avoids Selenium picking an older cached driver that
+            # doesn't support the attached browser (see SessionNotCreatedException).
+            if chrome_major:
+                try:
+                    # webdriver_manager changed its constructor kwargs across
+                    # versions. Inspect the available parameters and call the
+                    # appropriate kwarg to request a matching driver version.
+                    import inspect
+
+                    mgr_init = inspect.signature(ChromeDriverManager.__init__)
+                    params = mgr_init.parameters
+
+                    if 'version' in params:
+                        driver_path = ChromeDriverManager(version=chrome_major).install()
+                    elif 'chromedriver_version' in params:
+                        driver_path = ChromeDriverManager(chromedriver_version=chrome_major).install()
+                    elif 'driver_version' in params:
+                        driver_path = ChromeDriverManager(driver_version=chrome_major).install()
+                    else:
+                        # Unknown signature; fall back to default install() and hope
+                        # webdriver_manager picks a compatible binary.
+                        driver_path = ChromeDriverManager().install()
+
+                    driver = webdriver.Chrome(service=Service(driver_path), options=options)
+                except Exception as e:
+                    # If webdriver_manager fails for any reason, fall back to
+                    # Selenium's default behavior but surface a helpful log.
+                    self.print_out(f"webdriver_manager install failed: {e}")
+                    driver = webdriver.Chrome(options=options)
+            else:
+                # If we couldn't detect the browser major version, fall back
+                # to Selenium's default manager.
+                driver = webdriver.Chrome(options=options)
         else:
             # Start a fresh Chrome (visible, not headless, so you can interact)
             options.add_argument("--disable-popup-blocking")
