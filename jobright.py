@@ -101,7 +101,7 @@ class Main(Base):
                 "posted_at": posted_at,
                 "experience_level": data.get('jobSeniority'),
                 "job_type": data.get('employmentType'),
-                "skills": ", ".join(self.eliminate_space([skill.get("skill") for skill in data.get("detailQualifications", {}).get("mustHave", {}).get("hardSkill", [])])),
+                # "skills": ", ".join(self.eliminate_space([skill.get("skill") for skill in data.get("detailQualifications", {}).get("mustHave", {}).get("hardSkill", [])])),
                 "url": f"https://jobright.ai/jobs/info/{posting_id}",
                 "job_url": data.get('applyLink'),
                 # "data": details,
