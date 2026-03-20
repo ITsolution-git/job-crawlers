@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<!--
+  Open this file in Chrome to generate icon PNG files.
+  Right-click each canvas -> "Save image as" -> save to icons/ folder.
+  Or just click "Download All Icons" button.
+-->
+<html>
+<head>
+<title>Generate Icons</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; background: #f0f0f0; }
+  canvas { display: block; margin: 10px; border: 1px solid #ccc; background: #fff; }
+  button { margin: 5px; padding: 8px 16px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h2>Indeed External Jobs - Icon Generator</h2>
+<p>Click "Download All Icons" then move them into the <code>icons/</code> folder.</p>
+<button onclick="downloadAll()">Download All Icons</button>
+<div id="canvases"></div>
+<script>
+const sizes = [16, 48, 128];
+
+function drawIcon(size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const s = size;
+
+  // Background circle
+  ctx.fillStyle = '#2164f3';
+  ctx.beginPath();
+  ctx.arc(s/2, s/2, s/2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Draw a link/chain icon
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = Math.max(1.5, s * 0.08);
+  ctx.lineCap = 'round';
+
+  const pad = s * 0.2;
+  const r = s * 0.18;
+
+  // Left arc
+  ctx.beginPath();
+  ctx.arc(s * 0.35, s * 0.42, r, Math.PI * 0.6, Math.PI * 1.4, false);
+  ctx.stroke();
+
+  // Right arc
+  ctx.beginPath();
+  ctx.arc(s * 0.65, s * 0.58, r, Math.PI * 1.6, Math.PI * 0.4, false);
+  ctx.stroke();
+
+  // Connecting lines
+  ctx.beginPath();
+  ctx.moveTo(s * 0.42, s * 0.38);
+  ctx.lineTo(s * 0.58, s * 0.62);
+  ctx.stroke();
+
+  return canvas;
+}
+
+sizes.forEach(size => {
+  const canvas = drawIcon(size);
+  canvas.title = `icon${size}.png`;
+  const label = document.createElement('p');
+  label.textContent = `${size}x${size}`;
+  document.getElementById('canvases').appendChild(label);
+  document.getElementById('canvases').appendChild(canvas);
+});
+
+function downloadAll() {
+  sizes.forEach(size => {
+    const canvas = drawIcon(size);
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = `icon${size}.png`;
+    a.click();
+  });
+}
+</script>
+</body>
+</html>

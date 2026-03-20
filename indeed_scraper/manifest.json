@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "Indeed External Jobs Exporter",
+  "version": "2.0.0",
+  "description": "Collect and export external job listings from Indeed.com — skips Easy Apply jobs.",
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
+  "host_permissions": [
+    "https://www.indeed.com/*",
+    "https://*.indeed.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Indeed External Jobs"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.indeed.com/*",
+        "https://*.indeed.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
