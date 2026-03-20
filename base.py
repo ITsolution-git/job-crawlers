@@ -42,6 +42,27 @@ class Base:
     ]
     unique_index = 0
     history = []
+    search_queries = [
+        "javascript",
+        "typescript",
+        "python",
+        "django",
+        "react",
+        "vue",
+        "node",
+        "ruby",
+        "php",
+        "c#",
+        "java",
+        "react native",
+        "flutter",
+        "kotlin",
+        "swift",
+        "deep learning",
+        "machine learning",
+        "data engineering",
+        "ai"
+    ]
 
     def __init__(self, name, is_save_in_database=False):
         self.name = name.split(".")[0]
