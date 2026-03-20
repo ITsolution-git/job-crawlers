@@ -52,7 +52,7 @@ class Main(Base):
         try:
             data = job.get('document', {})
             posting_id = data.get('posting_id', None)
-            if posting_id is None or posting_id in self.history:
+            if posting_id in ["None", None, ""] or posting_id in self.history:
                 return 'duplicated'
 
             self.history.append(posting_id)

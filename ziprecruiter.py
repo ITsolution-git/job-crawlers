@@ -47,7 +47,7 @@ class Main(Base):
         # Keywords to search for (from your example URL)
         search_terms = ["javascript", "python", "ruby", "typescript", "node", "ai"]
 
-        for term in search_terms:
+        for term in self.search_queries:
             page_index = 1
             lk_value = None  # ZipRecruiter search/session token; required for stable pagination.
             self.print_out(f"=== Searching for term: {term} ===")
