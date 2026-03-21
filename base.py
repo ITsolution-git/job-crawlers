@@ -203,11 +203,20 @@ class Base:
             self.print_out(f"select_option: {e}")
 
     def get_writer(self):
+        # Keep a handle so we can flush on every write; this prevents
+        # losing rows when a browser/session crash stops the process mid-run.
+        self.csv_file = open(
+            f"data/{self.name}/{self.name}.csv",
+            mode="w",
+            newline="",
+            encoding="utf-8-sig",
+        )
         writer = csv.writer(
-            open(f'data/{self.name}/{self.name}.csv', mode='w', newline='', encoding="utf-8-sig"),
+            self.csv_file,
             delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL
         )
         writer.writerow(self.column_headers)
+        self.csv_file.flush()
         return writer
 
     def write(self, values):
@@ -215,6 +224,10 @@ class Base:
         for header in self.column_headers:
             row.append(values.get(header, ''))
         self.writer.writerow(row)
+        try:
+            self.csv_file.flush()
+        except Exception:
+            pass
         msg = f"{self.unique_index}: {values.get('url')}"
         if self.is_save_in_database:
             values["platform"] = self.platform.get("id")

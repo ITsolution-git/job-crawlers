@@ -59,10 +59,19 @@ class Main(Base):
 
             posted_at = posted_dt.strftime('%Y-%m-%d %H:%M:%S')
             url = f"https://simplify.jobs/jobs/click/{data.get('posting_id')}"
-            job_response = self.session.get(url)
-            if job_response.status_code == 200:
-                job_url = job_response.url
-            else:
+            job_url = url
+            try:
+                # Resolve redirects without browser navigation.
+                # Prefer HEAD (lighter), then fallback to GET if needed.
+                response = self.session.head(url, allow_redirects=True, timeout=10)
+                if response.status_code < 400 and response.url:
+                    job_url = response.url
+                else:
+                    response = self.session.get(url, allow_redirects=True, timeout=10, stream=True)
+                    if response.status_code < 400 and response.url:
+                        job_url = response.url
+                    response.close()
+            except Exception:
                 job_url = url
 
             self.write({

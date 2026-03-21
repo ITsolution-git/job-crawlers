@@ -1,8 +1,10 @@
 import os
 import re
 import time
+import json
+import base64
 from datetime import datetime, timedelta
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 
 from base import Base
 from selenium.webdriver.common.by import By
@@ -24,10 +26,23 @@ class Main(Base):
     # Debug: dump raw HTML to disk.
     # Keeping this False avoids creating lots of `data/ziprecruiter/page_*.html` files.
     dump_debug_html = False
+    us_state_abbrs = {
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+        "DC",
+    }
 
     def __init__(self, is_save_in_database: bool = False):
         super().__init__(os.path.basename(__file__), is_save_in_database=is_save_in_database)
         self.driver = self.get_driver()
+        # Enable HTML dumps on demand:
+        #   ZIPR_DUMP_HTML=1 python ziprecruiter.py
+        self.dump_debug_html = os.getenv("ZIPR_DUMP_HTML", "0").strip().lower() in {
+            "1", "true", "yes", "y"
+        }
         # keep track of URLs we've already written to avoid duplicates
         self._seen_urls = set()
 
@@ -197,6 +212,14 @@ class Main(Base):
                         if idx >= len(cards):
                             break
                         card = cards[idx]
+                        listing_url_hint = ""
+                        try:
+                            card_link = card.find_element(By.CSS_SELECTOR, "a[href*='/jobs/']")
+                            href = (card_link.get_attribute("href") or "").strip()
+                            if href:
+                                listing_url_hint = urljoin(self.base_url, href)
+                        except Exception:
+                            listing_url_hint = ""
 
                         # Scroll card into center of viewport
                         self.driver.execute_script(
@@ -218,7 +241,7 @@ class Main(Base):
                     time.sleep(1.5)
 
                     # Parse details from the right pane
-                    self.parse_from_right_pane(term)
+                    self.parse_from_right_pane(term, listing_url_hint)
 
                 page_index += 1
 
@@ -252,6 +275,116 @@ class Main(Base):
 
         return dt.strftime("%Y-%m-%d %H:%M:%S")
 
+    def _normalize_work_arrangement(self, text: str) -> str:
+        raw = (text or "").lower()
+        if "remote" in raw:
+            return "Remote"
+        if "hybrid" in raw:
+            return "Hybrid"
+        if "on-site" in raw or "onsite" in raw or "on site" in raw or "in person" in raw:
+            return "In Person"
+        return ""
+
+    def _normalize_country(self, location_text: str, work_arrangement: str) -> str:
+        loc = (location_text or "").strip()
+        if not loc:
+            return "USA" if work_arrangement in {"Remote", "Hybrid", "In Person"} else ""
+
+        upper_loc = loc.upper()
+        if "USA" in upper_loc or "UNITED STATES" in upper_loc or " U.S." in upper_loc:
+            return "USA"
+
+        # Split common location separators and inspect each token.
+        tokens = [t.strip() for t in re.split(r"[,\u2022|/]", loc) if t.strip()]
+        for token in tokens:
+            clean = token.strip().upper().replace(".", "")
+            if clean in self.us_state_abbrs:
+                return "USA"
+
+        # For this crawler we are searching US jobs, so fallback to USA unless
+        # we explicitly spot a known non-US country marker.
+        non_us_markers = [
+            "CANADA", "UNITED KINGDOM", "UK", "GERMANY", "FRANCE", "INDIA",
+            "SPAIN", "ITALY", "NETHERLANDS", "AUSTRALIA", "SINGAPORE",
+        ]
+        if any(marker in upper_loc for marker in non_us_markers):
+            # Keep last token if clearly non-US.
+            return tokens[-1] if tokens else loc
+
+        return "USA"
+
+    def _normalize_job_type(self, text: str) -> str:
+        raw = (text or "").lower()
+        if not raw:
+            return ""
+
+        # Normalize common variants to the canonical set:
+        # Contract, Full-Time, Part-Time, Internship
+        if any(k in raw for k in ["intern", "internship", "apprentice", "co-op", "coop"]):
+            return "Internship"
+        if any(k in raw for k in ["contractor", "contract ", " contract", "1099", "freelance", "consultant"]):
+            return "Contract"
+        if any(k in raw for k in ["part-time", "part time", "pt "]):
+            return "Part-Time"
+        if any(k in raw for k in ["full-time", "full time", "ft "]):
+            return "Full-Time"
+        return ""
+
+    def _decode_external_apply_from_match_token(self, redirect_url: str) -> str:
+        try:
+            parsed = urlparse(redirect_url)
+            qs = parse_qs(parsed.query)
+            token = (qs.get("match_token") or [""])[0]
+            if not token:
+                return ""
+
+            token = token.strip()
+            # URL-safe base64 with optional padding.
+            padding = "=" * (-len(token) % 4)
+            raw = base64.urlsafe_b64decode((token + padding).encode("utf-8"))
+            payload = json.loads(raw.decode("utf-8"))
+            ext = (payload.get("ExternalApplyUrl") or "").strip()
+            return ext
+        except Exception:
+            return ""
+
+    def _resolve_external_apply_url(self, href: str) -> str:
+        abs_href = urljoin(self.base_url, href or "").strip()
+        if not abs_href:
+            return ""
+
+        host = (urlparse(abs_href).netloc or "").lower()
+        if "ziprecruiter.com" not in host:
+            return abs_href
+
+        # ZipRecruiter redirect endpoint often embeds ExternalApplyUrl in match_token.
+        if "/job-redirect" in abs_href:
+            token_url = self._decode_external_apply_from_match_token(abs_href)
+            if token_url:
+                return token_url
+
+        # Fallback: follow redirect server-side.
+        try:
+            resp = self.session.get(
+                abs_href,
+                allow_redirects=True,
+                timeout=10,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
+                    )
+                },
+            )
+            final_url = (resp.url or "").strip()
+            final_host = (urlparse(final_url).netloc or "").lower()
+            if final_url and "ziprecruiter.com" not in final_host:
+                return final_url
+        except Exception:
+            pass
+
+        return ""
+
     def _extract_text(self, node, xpath_expr: str) -> str:
         res = node.xpath(xpath_expr)
         if not res:
@@ -269,7 +402,7 @@ class Main(Base):
         el = res[0]
         return (el.get(attr) or "").strip()
 
-    def parse_from_right_pane(self, term: str):
+    def parse_from_right_pane(self, term: str, listing_url_hint: str = ""):
         """
         Extract job details from the right-hand pane after a card click.
         """
@@ -305,8 +438,30 @@ class Main(Base):
             company = ""
             company_link = ""
 
-        # Job detail URL (use company_link as a fallback if we don't have a better one)
-        url = company_link or self.driver.current_url
+        # ZipRecruiter listing URL (internal URL should stay in `url`).
+        # Prefer the link from the clicked left-pane card when available.
+        url = (listing_url_hint or "").strip()
+        if not url:
+            url = self.driver.current_url or ""
+        if not url:
+            url = company_link or ""
+
+        # In some views `current_url` can remain the search URL.
+        # Try to pick an internal /jobs/... URL from the right pane as fallback.
+        if "/jobs/" not in url:
+            try:
+                job_anchors = right_pane.find_elements(By.CSS_SELECTOR, "a[href*='/jobs/']")
+                for anchor in job_anchors:
+                    href = (anchor.get_attribute("href") or "").strip()
+                    if href:
+                        url = urljoin(self.base_url, href)
+                        break
+            except Exception:
+                pass
+
+        # If still empty, fallback to company link.
+        if not url:
+            url = company_link or ""
 
         # Use URL as a poor-man's unique id (ZipRecruiter usually has job id in URL)
         unique_id = re.sub(r"[^a-zA-Z0-9]", "_", url)
@@ -323,13 +478,6 @@ class Main(Base):
             location = (location_el.text or "").strip()
         except Exception:
             location = ""
-
-        # Country: last comma-separated token from location
-        country = ""
-        if location:
-            parts = [p.strip() for p in location.split(",") if p.strip()]
-            if parts:
-                country = parts[-1]
 
         # Salary text like "$221K - $299K/yr"
         salary_text = ""
@@ -358,16 +506,23 @@ class Main(Base):
                 salary_period = "hour"
             salary_currency = "USD"
 
-        # Job type e.g. Full-time / Part-time
+        # Job type e.g. Full-time / Part-time / Contract / Internship
         try:
             job_type_el = right_pane.find_element(
                 By.XPATH,
                 ".//p[contains(@class,'text-body-md') and "
-                "(contains(., 'Full-time') or contains(., 'Part-time') or contains(., 'Contract'))]"
+                "("
+                "contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'full') "
+                "or contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'part') "
+                "or contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'contract') "
+                "or contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'intern')"
+                ")]"
             )
-            job_type = (job_type_el.text or "").strip()
+            job_type_raw = (job_type_el.text or "").strip()
         except Exception:
-            job_type = ""
+            job_type_raw = ""
+
+        job_type = self._normalize_job_type(job_type_raw)
 
         # Posted at relative text like "Posted 4 hours ago"
         posted_at = ""
@@ -381,15 +536,49 @@ class Main(Base):
         except Exception:
             posted_at = ""
 
-        # Work arrangement – look for Remote/Hybrid/On-site in the description/title
-        work_arrangement = ""
-        full_text = (title + " " + location + " " + salary_text).lower()
-        if "remote" in full_text:
-            work_arrangement = "Remote"
-        elif "hybrid" in full_text:
-            work_arrangement = "Hybrid"
-        elif "on-site" in full_text or "on site" in full_text:
-            work_arrangement = "On-site"
+        # Work arrangement normalized to: In Person, Hybrid, Remote
+        full_text = f"{title} {location} {salary_text}"
+        work_arrangement = self._normalize_work_arrangement(full_text)
+
+        # Normalize country to USA for US locations.
+        country = self._normalize_country(location, work_arrangement)
+
+        # External apply link (if not Quick Apply).
+        # Keep `url` as ZipRecruiter URL and store external target in `job_url`.
+        job_url = url
+        try:
+            # Search in right pane first, then page-wide for apply links.
+            apply_links = right_pane.find_elements(By.CSS_SELECTOR, "a[href]")
+            try:
+                apply_links += self.driver.find_elements(By.CSS_SELECTOR, "a[href]")
+            except Exception:
+                pass
+            for link in apply_links:
+                href = (link.get_attribute("href") or "").strip()
+                text = (link.text or "").strip().lower()
+                aria = (link.get_attribute("aria-label") or "").strip().lower()
+                title_attr = (link.get_attribute("title") or "").strip().lower()
+                if not href:
+                    continue
+
+                abs_href = urljoin(self.base_url, href)
+
+                # Prefer links that look like apply actions.
+                looks_like_apply = (
+                    "apply" in text
+                    or "apply" in aria
+                    or "apply" in title_attr
+                    or "apply" in abs_href.lower()
+                )
+                if not looks_like_apply:
+                    continue
+
+                resolved_external = self._resolve_external_apply_url(abs_href)
+                if resolved_external:
+                    job_url = resolved_external
+                    break
+        except Exception:
+            pass
 
         try:
             self.write(
@@ -406,9 +595,9 @@ class Main(Base):
                     "posted_at": posted_at,
                     "experience_level": "",
                     "job_type": job_type,
-                    "skills": "",
+                    "skills": term,
                     "url": url,
-                    "job_url": url,
+                    "job_url": job_url or url,
                 }
             )
         except Exception as e:
@@ -416,4 +605,4 @@ class Main(Base):
 
 
 if __name__ == "__main__":
-    Main(is_save_in_database=True).run()
+    Main(is_save_in_database=False).run()
