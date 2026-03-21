@@ -31,7 +31,8 @@ class Main(Base):
                         'content-type': 'text/plain',
                         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
                     },
-                    json={"searches":[{"query_by":"title,company_name,functions,locations","per_page":50,"sort_by":"_text_match:desc,start_date:desc","highlight_full_fields":"title,company_name,functions,locations","collection":"jobs","q":query,"facet_by":"countries,degrees,experience_level,functions,locations,travel_requirements,type","filter_by":"countries:=[`United States`, `Germany`, `Spain`, `Italy`, `France`, `Ireland`, `Australia`, `Canada`, `Netherlands`, `Sweden`, `Belgium`, `Switzerland`]","max_facet_values":50,"page": page_index}]},
+                    json={"searches":[{"query_by":"title,company_name,functions,locations","per_page":50,"sort_by":"_text_match:desc,start_date:desc","highlight_full_fields":"title,company_name,functions,locations","collection":"jobs","q":query,"facet_by":"countries,degrees,experience_level,functions,locations,travel_requirements,type","filter_by":"countries:=[`United States`]","max_facet_values":50,"page": page_index}]},
+                    # json={"searches":[{"query_by":"title,company_name,functions,locations","per_page":50,"sort_by":"_text_match:desc,start_date:desc","highlight_full_fields":"title,company_name,functions,locations","collection":"jobs","q":query,"facet_by":"countries,degrees,experience_level,functions,locations,travel_requirements,type","filter_by":"countries:=[`United States`, `Germany`, `Spain`, `Italy`, `France`, `Ireland`, `Australia`, `Canada`, `Netherlands`, `Sweden`, `Belgium`, `Switzerland`]","max_facet_values":50,"page": page_index}]},
                 )
                 jobs = response.json()["results"][0]["hits"]
                 for job in jobs:
@@ -83,7 +84,8 @@ class Main(Base):
                 "unique_id": data.get('posting_id'),
                 "title": data.get('title'),
                 "company": data.get('company_name'),
-                "country": self.unique_countries(data.get('locations')),
+                # "country": self.unique_countries(data.get('locations')),
+                "country": "United States",
                 "salary_min": data.get('min_salary', 0),
                 "salary_max": data.get('max_salary', 0),
                 "salary_period": data.get('salary_period', 0),
@@ -95,7 +97,7 @@ class Main(Base):
                 "skills": ", ".join(item.get("name", "") for item in details.get('skills', [])),
                 "url": url,
                 "job_url": job_url,
-                "data": details,
+                # "data": details,
             })
         except Exception as e:
             self.print_out(f"Parse Error: {e}")
@@ -123,4 +125,4 @@ class Main(Base):
 
 
 if __name__ == '__main__':
-    Main(is_save_in_database=False).run()
+    Main(is_save_in_database=True).run()
