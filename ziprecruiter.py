@@ -3,6 +3,7 @@ import re
 import time
 import json
 import base64
+import traceback
 from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urljoin, urlparse
 
@@ -62,7 +63,7 @@ class Main(Base):
         # Keywords to search for (from your example URL)
         search_terms = ["javascript", "python", "ruby", "typescript", "node", "ai"]
 
-        for term in search_terms:
+        for term in self.search_queries:
             page_index = 1
             lk_value = None  # ZipRecruiter search/session token; required for stable pagination.
             self.print_out(f"=== Searching for term: {term} ===")
@@ -204,6 +205,91 @@ class Main(Base):
                     break
 
                 # Click cards one by one; re-query each time to avoid stale references
+                def safe_click(element):
+                    """Try several click strategies with small retries.
+
+                    Returns True if a click was dispatched, False otherwise.
+                    """
+                    try:
+                        # Scroll into center first
+                        self.driver.execute_script(
+                            "arguments[0].scrollIntoView({block: 'center'});", element
+                        )
+                    except Exception:
+                        pass
+
+                    # Helper to capture debug info about the element when things fail
+                    def _log_element_debug(el, tag=""):
+                        try:
+                            outer = el.get_attribute('outerHTML') or ''
+                        except Exception:
+                            outer = '<outerHTML unavailable>'
+                        try:
+                            rect = self.driver.execute_script(
+                                'var r = arguments[0].getBoundingClientRect(); return {left: r.left, top: r.top, width: r.width, height: r.height};',
+                                el,
+                            )
+                        except Exception:
+                            rect = None
+                        short_outer = outer[:1000] + ('...' if len(outer) > 1000 else '')
+                        self.print_out(f"[click-debug]{tag} outerHTML={short_outer}")
+                        self.print_out(f"[click-debug]{tag} rect={rect}")
+
+                    strategies = []
+
+                    # ActionChains click near center
+                    def action_click(el):
+                        actions = ActionChains(self.driver)
+                        size = el.size if hasattr(el, 'size') else {'width': 0, 'height': 0}
+                        actions.move_to_element_with_offset(
+                            el, size.get('width', 0) / 2, size.get('height', 0) / 2
+                        ).click().perform()
+
+                    # element.click()
+                    def element_click(el):
+                        el.click()
+
+                    # Simple JS click
+                    def js_click(el):
+                        self.driver.execute_script('arguments[0].click();', el)
+
+                    # JS MouseEvent at center of bounding rect (more realistic click)
+                    def js_mouse_event_click(el):
+                        script = '''
+                        var el = arguments[0];
+                        var r = el.getBoundingClientRect();
+                        var cx = r.left + r.width/2;
+                        var cy = r.top + r.height/2;
+                        var ev = new MouseEvent('click', {view: window, bubbles: true, cancelable: true, clientX: cx, clientY: cy});
+                        el.dispatchEvent(ev);
+                        return {cx: cx, cy: cy};
+                        '''
+                        return self.driver.execute_script(script, el)
+
+                    strategies.extend([action_click, element_click, js_click, js_mouse_event_click])
+
+                    last_exc = None
+                    for strat in strategies:
+                        try:
+                            res = strat(element)
+                            # Strategy succeeded
+                            return True
+                        except Exception as e:
+                            last_exc = e
+                            self.print_out(f"click strategy {getattr(strat, '__name__', str(strat))} failed: {e}")
+                            self.print_out(traceback.format_exc())
+                            try:
+                                _log_element_debug(element, tag=f"strategy_fail_{getattr(strat, '__name__', '')}")
+                            except Exception:
+                                pass
+                            time.sleep(0.25)
+                            continue
+
+                    # All strategies failed
+                    if last_exc:
+                        self.print_out(f"All click strategies failed: {last_exc}")
+                    return False
+
                 for idx in range(len(cards)):
                     try:
                         cards = self.driver.find_elements(
@@ -221,24 +307,48 @@ class Main(Base):
                         except Exception:
                             listing_url_hint = ""
 
-                        # Scroll card into center of viewport
-                        self.driver.execute_script(
-                            "arguments[0].scrollIntoView({block: 'center'});", card
-                        )
-                        time.sleep(0.5)
+                        # Attempt to click the card with retries
+                        clicked = False
+                        for attempt in range(3):
+                            try:
+                                clicked = safe_click(card)
+                            except Exception as e:
+                                self.print_out(f"click attempt error for card {idx}: {e}")
+                                clicked = False
 
-                        # Click near the center of the card to avoid hitting child buttons
-                        actions = ActionChains(self.driver)
-                        size = card.size
-                        actions.move_to_element_with_offset(
-                            card, size.get("width", 0) / 2, size.get("height", 0) / 2
-                        ).click().perform()
+                            if clicked:
+                                # Wait briefly for the right pane to update
+                                wait_deadline = time.time() + 5
+                                while time.time() < wait_deadline:
+                                    try:
+                                        panes = self.driver.find_elements(
+                                            By.CSS_SELECTOR, "div[data-testid='job-details-scroll-container']"
+                                        )
+                                        if panes and any((p.text or '').strip() for p in panes):
+                                            break
+                                    except Exception:
+                                        pass
+                                    time.sleep(0.3)
+                                break
+
+                            # If not clicked, try re-querying the card reference and retry
+                            time.sleep(0.5)
+                            try:
+                                cards = self.driver.find_elements(
+                                    By.CSS_SELECTOR, ".job_results_two_pane .job_result_two_pane_v2"
+                                )
+                                if idx < len(cards):
+                                    card = cards[idx]
+                            except Exception:
+                                pass
+
+                        if not clicked:
+                            self.print_out(f"Failed to click card {idx} for '{term}' after retries.")
+                            continue
+
                     except Exception as e:
-                        self.print_out(f"Failed to click card {idx} for '{term}': {e}")
+                        self.print_out(f"Failed to prepare/click card {idx} for '{term}': {e}")
                         continue
-
-                    # Let the right pane update
-                    time.sleep(1.5)
 
                     # Parse details from the right pane
                     self.parse_from_right_pane(term, listing_url_hint)

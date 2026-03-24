@@ -21,41 +21,56 @@ class Main(Base):
 
     def run(self):
         page_index = 1
-        while True:
-            self.print_out(f"Running: {self.name} - Page {page_index}")
-            response = self.session.post("https://js-ha.simplify.jobs/multi_search?x-typesense-api-key=SWF1ODFZbzBkcVlVdnVwT2FqUE5EZ3JpSk5hVmdpUHg1SklXWEdGbHZVRT1POHJieyJleGNsdWRlX2ZpZWxkcyI6ImNvbXBhbnlfdXJsLGNhdGVnb3JpZXMsYWRkaXRpb25hbF9yZXF1aXJlbWVudHMsY291bnRyaWVzLGRlZ3JlZXMsZ2VvbG9jYXRpb25zLGluZHVzdHJpZXMsaXNfc2ltcGxlX2FwcGxpY2F0aW9uLGpvYl9saXN0cyxsZWFkZXJzaGlwX3R5cGUsc2VjdXJpdHlfY2xlYXJhbmNlLHNraWxscyx1cmwifQ%3D%3D",
-                headers={
-                    'accept': 'application/json, text/plain, */*',
-                    'content-type': 'text/plain',
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
-                },
-                json={"searches":[{"query_by":"title,company_name,functions,locations","per_page":50,"sort_by":"_text_match:desc,start_date:desc","highlight_full_fields":"title,company_name,functions,locations","collection":"jobs","q":"*","facet_by":"countries,degrees,experience_level,functions,locations,travel_requirements,type","filter_by":"countries:=[`United States`, `Germany`, `Spain`, `Italy`, `France`, `Ireland`, `Australia`, `Canada`, `Netherlands`, `Sweden`, `Belgium`, `Switzerland`]","max_facet_values":50,"page": page_index}]},
-            )
-            jobs = response.json()["results"][0]["hits"]
-            for job in jobs:
-                self.parse(job)
+        for query in self.search_queries:
+            need_to_break = False
+            while True:
+                self.print_out(f"Running: {self.name} - Page {query} - {page_index}" )
+                response = self.session.post("https://js-ha.simplify.jobs/multi_search?x-typesense-api-key=SWF1ODFZbzBkcVlVdnVwT2FqUE5EZ3JpSk5hVmdpUHg1SklXWEdGbHZVRT1POHJieyJleGNsdWRlX2ZpZWxkcyI6ImNvbXBhbnlfdXJsLGNhdGVnb3JpZXMsYWRkaXRpb25hbF9yZXF1aXJlbWVudHMsY291bnRyaWVzLGRlZ3JlZXMsZ2VvbG9jYXRpb25zLGluZHVzdHJpZXMsaXNfc2ltcGxlX2FwcGxpY2F0aW9uLGpvYl9saXN0cyxsZWFkZXJzaGlwX3R5cGUsc2VjdXJpdHlfY2xlYXJhbmNlLHNraWxscyx1cmwifQ%3D%3D",
+                    headers={
+                        'accept': 'application/json, text/plain, */*',
+                        'content-type': 'text/plain',
+                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+                    },
+                    json={"searches":[{"query_by":"title,company_name,functions,locations","per_page":50,"sort_by":"_text_match:desc,start_date:desc","highlight_full_fields":"title,company_name,functions,locations","collection":"jobs","q":query,"facet_by":"countries,degrees,experience_level,functions,locations,travel_requirements,type","filter_by":"countries:=[`United States`]","max_facet_values":50,"page": page_index}]},
+                    # json={"searches":[{"query_by":"title,company_name,functions,locations","per_page":50,"sort_by":"_text_match:desc,start_date:desc","highlight_full_fields":"title,company_name,functions,locations","collection":"jobs","q":query,"facet_by":"countries,degrees,experience_level,functions,locations,travel_requirements,type","filter_by":"countries:=[`United States`, `Germany`, `Spain`, `Italy`, `France`, `Ireland`, `Australia`, `Canada`, `Netherlands`, `Sweden`, `Belgium`, `Switzerland`]","max_facet_values":50,"page": page_index}]},
+                )
+                jobs = response.json()["results"][0]["hits"]
+                for job in jobs:
+                    res = self.parse(job)
+                    if not res:
+                        need_to_break = True
+                        break
+                
+                if need_to_break:
+                    break
 
-            if len(jobs) == 0:
-                break
+                if len(jobs) == 0:
+                    break
 
-            page_index += 1
+                page_index += 1
     
     def parse(self, job):
         try:
             data = job.get('document', {})
+            posting_id = data.get('posting_id', None)
+            if posting_id in ["None", None, ""] or posting_id in self.history:
+                return 'duplicated'
+
+            self.history.append(posting_id)
+
             response = self.session.get(f"https://api.simplify.jobs/v2/job-posting/:id/{data.get('posting_id')}/company")
             details = response.json()
 
             ts = data.get('start_date')
             if not ts:
-                return
+                return 'no start date'
             # handle seconds vs milliseconds epoch
             if ts > 10**12:
                 ts = ts / 1000.0
 
             posted_dt = datetime.fromtimestamp(ts)
             if not self._is_posted_from_yesterday_to_now(posted_dt):
-                exit(1)
+                return False
 
             posted_at = posted_dt.strftime('%Y-%m-%d %H:%M:%S')
             url = f"https://simplify.jobs/jobs/click/{data.get('posting_id')}"
@@ -78,7 +93,8 @@ class Main(Base):
                 "unique_id": data.get('posting_id'),
                 "title": data.get('title'),
                 "company": data.get('company_name'),
-                "country": self.unique_countries(data.get('locations')),
+                # "country": self.unique_countries(data.get('locations')),
+                "country": "United States",
                 "salary_min": data.get('min_salary', 0),
                 "salary_max": data.get('max_salary', 0),
                 "salary_period": data.get('salary_period', 0),
@@ -90,10 +106,12 @@ class Main(Base):
                 "skills": ", ".join(item.get("name", "") for item in details.get('skills', [])),
                 "url": url,
                 "job_url": job_url,
-                "data": details,
+                # "data": details,
             })
         except Exception as e:
             self.print_out(f"Parse Error: {e}")
+        
+        return 'success'
 
     def unique_countries(self, locations):
         out = []
@@ -116,4 +134,4 @@ class Main(Base):
 
 
 if __name__ == '__main__':
-    Main(is_save_in_database=False).run()
+    Main(is_save_in_database=True).run()

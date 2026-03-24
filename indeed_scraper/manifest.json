@@ -6,7 +6,8 @@
   "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "https://www.indeed.com/*",
-    "https://*.indeed.com/*"
+    "https://*.indeed.com/*",
+    "http://18.191.195.218/*"
   ],
   "action": {
     "default_popup": "popup.html",

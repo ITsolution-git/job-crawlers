@@ -76,6 +76,18 @@ Run a crawler script directly from the repo root:
 python .\simplify.py
 ```
 
+Run all 3 crawlers via `main.py`:
+
+```powershell
+python .\main.py
+```
+
+By default, `main.py` runs with **DB saving enabled** (saves to CSV + posts to the Job Feeder server). To run in CSV-only mode:
+
+```powershell
+python .\main.py --csv-only
+```
+
 Other scripts are present as templates/stubs and may not yet scrape real data:
 
 ```powershell
